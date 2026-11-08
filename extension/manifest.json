@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Rediffmail Pro Batch Archiver",
+  "version": "1.0.0",
+  "description": "HUD overlay to automate batch email & attachment downloads directly from Rediffmail Pro session.",
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.rediffmailpro.com/*",
+    "*://*.rediff.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.rediffmailpro.com/*",
+        "*://*.rediff.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["overlay.css"]
+    }
+  ],
+  "action": {
+    "default_title": "Rediffmail Pro Archiver"
+  }
+}
