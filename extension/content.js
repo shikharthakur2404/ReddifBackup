@@ -13,15 +13,15 @@
     </div>
     <div id="rediff-archiver-body">
       <div id="rediff-archiver-stats">
-        <span id="rediff-stat-items">Page: 1 | Mails: 0</span>
+        <span id="rediff-stat-items">Mails: 0 | Attachments: 0</span>
         <span id="rediff-stat-status">Status: Idle</span>
       </div>
+      <button id="btn-deep-crawl" class="hud-btn" style="background:#238636; font-size:13px; padding:10px;">⚡ Auto-Scroll & Download ALL (Aug - Nov)</button>
       <div style="display:flex; gap:6px;">
         <button id="btn-scan" class="hud-btn secondary" style="flex:1;">🔍 Scan View</button>
-        <button id="btn-download-page" class="hud-btn" style="flex:1;">⬇ Current Page</button>
+        <button id="btn-download-page" class="hud-btn secondary" style="flex:1;">⬇ Current View</button>
       </div>
-      <button id="btn-download-all-pages" class="hud-btn" style="background:#1f6feb;">⚡ Auto-Download ALL Pages</button>
-      <div id="rediff-archiver-logs">Ready. Click 'Auto-Download ALL Pages' to crawl every page.</div>
+      <div id="rediff-archiver-logs">Ready. Click 'Auto-Scroll & Download ALL' to crawl the full infinite mailbox history.</div>
     </div>
   `;
   document.body.appendChild(hud);
@@ -31,7 +31,7 @@
   const statusEl = document.getElementById("rediff-stat-status");
   const btnScan = document.getElementById("btn-scan");
   const btnDownloadPage = document.getElementById("btn-download-page");
-  const btnDownloadAll = document.getElementById("btn-download-all-pages");
+  const btnDeepCrawl = document.getElementById("btn-deep-crawl");
   const btnToggle = document.getElementById("rediff-archiver-toggle");
   const bodyEl = document.getElementById("rediff-archiver-body");
 
@@ -56,121 +56,98 @@
     }
   });
 
+  function getScrollContainer() {
+    const rows = document.querySelectorAll("div[class*='row'], tr, div.mail-item, [role='row']");
+    for (const r of rows) {
+      let p = r.parentElement;
+      while (p && p !== document.body) {
+        const style = window.getComputedStyle(p);
+        if (style.overflowY === "auto" || style.overflowY === "scroll") return p;
+        p = p.parentElement;
+      }
+    }
+    return document.scrollingElement || document.body;
+  }
+
   function getMailRows() {
-    const rows = Array.from(document.querySelectorAll("div[class*='mail_list'], div[class*='row'], tr, div.mail-item, [role='row']"));
-    const validRows = rows.filter(r => {
-      const hasCheckbox = r.querySelector("input[type='checkbox']") || r.querySelector("[class*='chk']");
-      const hasSubject = r.innerText && r.innerText.includes("\n");
-      return hasCheckbox && hasSubject;
-    });
-
-    if (validRows.length > 0) return validRows;
-
-    const rowsByCheckbox = Array.from(document.querySelectorAll("input[type='checkbox']"))
-      .map(cb => cb.closest("div[class*='row'], tr, div[class*='item'], div[style*='display']"))
+    const rows = Array.from(document.querySelectorAll("div[class*='row'], tr, div.mail-item, [role='row']"));
+    const valid = rows.filter(r => r.querySelector("input[type='checkbox']"));
+    if (valid.length > 0) return valid;
+    return Array.from(document.querySelectorAll("input[type='checkbox']"))
+      .map(cb => cb.closest("div[class*='row'], tr, div[class*='item']"))
       .filter(Boolean);
-    
-    return [...new Set(rowsByCheckbox)];
   }
 
-  function findNextPageButton() {
-    // 1. Check title/aria attributes
-    const byAttr = document.querySelector("[title*='Next' i], [aria-label*='Next' i], [title*='next page' i]");
-    if (byAttr && !isElementDisabled(byAttr)) return byAttr;
-
-    // 2. Check pagination container buttons/links
-    const candidates = Array.from(document.querySelectorAll(".pagination a, .paginate a, [class*='page'] a, [class*='page'] button, .next, .pg-next"));
-    for (const el of candidates) {
-      const txt = (el.innerText || "").trim();
-      if ((txt === ">" || txt === "»" || txt.toLowerCase() === "next") && !isElementDisabled(el)) {
-        return el;
-      }
-    }
-
-    // 3. Fallback: Search all clickable elements with arrow symbols
-    const allClickable = Array.from(document.querySelectorAll("a, button, span[onclick]"));
-    for (const el of allClickable) {
-      const txt = (el.innerText || "").trim();
-      const title = (el.getAttribute("title") || "").toLowerCase();
-      if ((txt === ">" || txt === "»" || title.includes("next")) && !isElementDisabled(el)) {
-        return el;
-      }
-    }
-
-    return null;
-  }
-
-  function isElementDisabled(el) {
-    if (!el) return true;
-    if (el.disabled || el.getAttribute("disabled") !== null) return true;
-    const cls = el.className || "";
-    if (typeof cls === "string" && (cls.includes("disabled") || cls.includes("inactive"))) return true;
-    const style = window.getComputedStyle(el);
-    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return true;
-    return false;
+  function hasAttachment(row) {
+    const html = row.innerHTML.toLowerCase();
+    return html.includes("paperclip") || html.includes("attach") || html.includes("clip") || html.includes("ico_att");
   }
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  async function processCurrentPage(pageNumber = 1) {
+  btnScan.addEventListener("click", () => {
     const rows = getMailRows();
-    log(`[Page ${pageNumber}] Processing ${rows.length} email entries...`);
-    statsEl.innerText = `Page: ${pageNumber} | Mails: ${rows.length}`;
+    const withAtt = rows.filter(hasAttachment);
+    statsEl.innerText = `Mails: ${rows.length} | Attachments: ${withAtt.length}`;
+    log(`Scanned: Found ${rows.length} loaded emails (${withAtt.length} with attachments).`);
+  });
 
-    for (let i = 0; i < rows.length; i++) {
+  async function downloadFromRows(targetRows) {
+    log(`Starting extraction for ${targetRows.length} emails with attachments...`);
+    let downloaded = 0;
+
+    for (let i = 0; i < targetRows.length; i++) {
       if (shouldStop) break;
-      const row = rows[i];
+      const row = targetRows[i];
 
       const originalBg = row.style.backgroundColor;
-      row.style.backgroundColor = "rgba(56, 139, 253, 0.25)";
+      row.style.backgroundColor = "rgba(56, 139, 253, 0.3)";
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
 
       const snippet = (row.innerText || "").split("\n").filter(Boolean).slice(0, 2).join(" - ").trim();
-      log(`  [${i + 1}/${rows.length}] Opening: ${snippet.substring(0, 35)}...`);
+      log(`[${i + 1}/${targetRows.length}] Opening: ${snippet.substring(0, 35)}...`);
 
-      const clickTarget = row.querySelector("a, span, [class*='subject']") || row;
+      const clickTarget = row.querySelector("a, span[class*='subject'], [class*='sender']") || row;
       clickTarget.click();
-      await sleep(1800);
+      await sleep(2200);
 
-      const attLinks = Array.from(document.querySelectorAll("a[href*='download'], a[href*='attachment'], a[download], [title*='Download']"));
-      const validLinks = attLinks.filter(a => {
-        const href = a.getAttribute("href") || "";
-        return href && !href.startsWith("#") && !href.startsWith("javascript:void");
-      });
+      const attLinks = Array.from(document.querySelectorAll("a[href*='download'], a[href*='attachment'], a[download], [title*='Download']"))
+        .filter(a => {
+          const h = a.getAttribute("href") || "";
+          return h && !h.startsWith("#") && !h.startsWith("javascript:void");
+        });
 
-      if (validLinks.length > 0) {
-        log(`    -> Found ${validLinks.length} attachment(s). Downloading...`);
-        for (const link of validLinks) {
+      if (attLinks.length > 0) {
+        log(`  -> Downloading ${attLinks.length} attachment(s)...`);
+        for (const link of attLinks) {
           const url = link.href;
           const filename = (link.innerText || link.getAttribute("download") || "attachment").trim();
           chrome.runtime.sendMessage({
             action: "download_file",
             url: url,
-            filename: `P${pageNumber}_${i + 1}_${filename}`
+            filename: `${i + 1}_${filename}`
           });
-          await sleep(500);
+          downloaded++;
+          await sleep(600);
         }
       } else {
         const downloadAllBtn = Array.from(document.querySelectorAll("button, a, span")).find(el => 
           (el.innerText || "").toLowerCase().includes("download all")
         );
         if (downloadAllBtn) {
-          log(`    -> Clicking 'Download all attachments'...`);
+          log(`  -> Triggering 'Download all attachments'...`);
           downloadAllBtn.click();
-          await sleep(1000);
+          downloaded++;
+          await sleep(1500);
         }
       }
 
       row.style.backgroundColor = originalBg;
-      await sleep(800);
+      await sleep(1000);
     }
-  }
 
-  btnScan.addEventListener("click", () => {
-    const rows = getMailRows();
-    const nextBtn = findNextPageButton();
-    statsEl.innerText = `Mails: ${rows.length} | Next Page: ${nextBtn ? 'Found' : 'End'}`;
-    log(`Scanned view: Found ${rows.length} emails. Next Page button: ${nextBtn ? 'Yes' : 'Not detected/Last page'}`);
-  });
+    log(`[✓] Extraction round complete. Downloaded: ${downloaded} files.`);
+  }
 
   btnDownloadPage.addEventListener("click", async () => {
     if (isRunning) return;
@@ -179,8 +156,8 @@
     btnDownloadPage.disabled = true;
     statusEl.innerText = "Status: Running";
     try {
-      await processCurrentPage(1);
-      log(`[✓] Current page download completed.`);
+      const rows = getMailRows().filter(hasAttachment);
+      await downloadFromRows(rows);
     } catch (err) {
       log(`[!] Error: ${err.message}`);
     } finally {
@@ -190,47 +167,66 @@
     }
   });
 
-  btnDownloadAll.addEventListener("click", async () => {
+  btnDeepCrawl.addEventListener("click", async () => {
     if (isRunning) {
       shouldStop = true;
-      log(`[*] Stopping auto-page crawl...`);
+      log(`[*] Halting crawler...`);
       return;
     }
     isRunning = true;
     shouldStop = false;
-    btnDownloadAll.innerText = "🛑 Stop Crawl";
-    btnDownloadAll.style.background = "#da3633";
-    statusEl.innerText = "Status: Crawling All Pages";
-
-    let currentPage = 1;
+    btnDeepCrawl.innerText = "🛑 Stop Crawl";
+    btnDeepCrawl.style.background = "#da3633";
+    statusEl.innerText = "Status: Auto-Scrolling Mailbox";
 
     try {
-      while (!shouldStop) {
-        log(`\n=== STARTING PAGE ${currentPage} ===`);
-        await processCurrentPage(currentPage);
+      const container = getScrollContainer();
+      log(`[*] Auto-scrolling to unroll full history back to August...`);
 
-        const nextBtn = findNextPageButton();
-        if (!nextBtn) {
-          log(`[✓] No further 'Next Page' button found. Reached the final page!`);
-          break;
+      let prevCount = 0;
+      let stationaryRounds = 0;
+
+      for (let cycle = 1; cycle <= 60; cycle++) {
+        if (shouldStop) break;
+        const count = getMailRows().length;
+        statsEl.innerText = `Scrolled: ${count} emails`;
+        log(`  Cycle ${cycle}: Loaded ${count} emails...`);
+
+        container.scrollTop = container.scrollHeight;
+        window.scrollTo(0, document.body.scrollHeight);
+        await sleep(2000);
+
+        if (count === prevCount) {
+          stationaryRounds++;
+          if (stationaryRounds >= 3) {
+            log(`[✓] Reached the oldest email in mailbox!`);
+            break;
+          }
+        } else {
+          stationaryRounds = 0;
         }
-
-        log(`[*] Clicking 'Next Page' -> Moving to page ${currentPage + 1}...`);
-        nextBtn.click();
-        await sleep(3500); // Wait for AJAX page render
-
-        currentPage++;
+        prevCount = count;
       }
-      log(`\n[✓] ALL PAGES CRAWLED! Total pages processed: ${currentPage}`);
+
+      if (!shouldStop) {
+        statusEl.innerText = "Status: Downloading Attachments";
+        const allLoaded = getMailRows();
+        const withAttachments = allLoaded.filter(hasAttachment);
+        log(`\n[*] Total emails loaded: ${allLoaded.length}`);
+        log(`[*] Total with attachments: ${withAttachments.length}`);
+
+        await downloadFromRows(withAttachments);
+        log(`\n[✓] FULL DEEP ARCHIVE COMPLETED!`);
+      }
     } catch (err) {
-      log(`[!] Crawler encountered error: ${err.message}`);
+      log(`[!] Error during deep crawl: ${err.message}`);
     } finally {
       isRunning = false;
-      btnDownloadAll.innerText = "⚡ Auto-Download ALL Pages";
-      btnDownloadAll.style.background = "#1f6feb";
+      btnDeepCrawl.innerText = "⚡ Auto-Scroll & Download ALL (Aug - Nov)";
+      btnDeepCrawl.style.background = "#238636";
       statusEl.innerText = "Status: Idle";
     }
   });
 
-  log("Extension HUD ready with Multi-Page Crawl engine.");
+  log("Extension HUD v2.0 initialized with Infinite-Scroll Deep Extractor.");
 })();
