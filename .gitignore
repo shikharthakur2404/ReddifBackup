@@ -19,3 +19,7 @@ credentials.json
 token.json
 service_account.json
 *.zip
+
+# Local automation logs and lock
+logs/
+.archive-run.lock

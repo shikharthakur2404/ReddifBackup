@@ -1,121 +1,177 @@
-# Pushkar's Quick-Start & Operational Guide 🚀
-### Rediffmail Pro Email & Attachment Archiver Suite
+# Pushkar's Rediffmail Backup Guide
 
-Hey Pushkar! This repository contains the complete automated toolchain to back up all Rediffmail Pro emails and their attachments into clean, chronological date/time folders.
+The current destination is the local `backup_vault/` folder. Historical mail is
+being archived through Brave because IMAP and POP3 exposed only recent messages.
+The archive is not complete: see [ARCHIVE_STATUS.md](ARCHIVE_STATUS.md).
 
-Everything has been built, tested, and verified. Follow this exact guide to run your backup.
+**Automation setup is pending macOS permission:** the installed job cannot yet
+read this Downloads workspace. See the permission section below.
 
----
+## Resume the historical archive
 
-## ⚡ Step 1: Clone & Verify Setup
-
-Open your Terminal (macOS/Linux) or Command Prompt/PowerShell (Windows):
+Use the existing workspace to retain the downloaded files and resume manifest:
 
 ```bash
-git clone https://github.com/shikharthakur2404/ReddifBackup.git
-cd ReddifBackup
+cd /Users/shikharthakur/Downloads/ReddifBackup
 ```
 
-Run the built-in test suite to ensure your Python environment is ready:
+A fresh Git clone contains code and documentation only. Mailbox data, attachments,
+credentials, and the resume manifest are excluded from Git.
+
+1. After the server quota resets, open Brave with its local debugging port.
+   If Brave is already running without that port, quit it normally first.
+
+   ```bash
+   open -a 'Brave Browser' --args --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 'https://webmail.rediffmailpro.com/'
+   ```
+
+2. Sign in to Rediffmail in Brave and leave the mailbox tab open. No password
+   needs to be added to a script or configuration file.
+
+3. With Node.js 22+ and Python 3 installed, run:
+
+   ```bash
+   node webmail_archive.mjs
+   python3 extract_webmail.py
+   python3 vault_inventory.py
+   ```
+
+The downloader re-enumerates the folders, verifies saved originals against their
+SHA-256 hashes, and skips intact files. The extractor uses stable attachment paths,
+so rerunning it does not create another copy of each attachment.
+
+Run extraction and inventory even if the download stops at the daily quota. The
+extractor returns exit code 1 when messages are still missing; inspect its report
+rather than treating that exit code alone as evidence of corrupt files.
+
+## Files and verification
+
+```text
+backup_vault/
+├── Webmail/
+│   ├── Inbox/2026-10/<message-id>/
+│   │   ├── message.eml
+│   │   └── attachments/
+│   ├── manifest.json
+│   └── verification.json
+├── inventory.json
+└── ... earlier IMAP/POP3 backups
+```
+
+- `message.eml` contains the original email and its embedded attachments.
+- `manifest.json` records enumerated messages, saved paths, sizes, and hashes.
+- `verification.json` records extracted attachment hashes and errors. Only
+  `verified: true` confirms that the enumerated webmail archive passed verification.
+- `inventory.json` lists actual local files and hashes. It does not independently
+  certify historical completeness.
+
+Webmail folders use UTC months; file modification times use the server message
+timestamp. The earlier IMAP/POP3 files remain in place. Counts across the whole
+vault include overlap between those backups and Webmail.
+
+## Daily quota and session expiry
+
+On November 8, Rediffmail returned: “You have exhausted the number of limit for
+the day.” It subsequently returned `INVALID_SESSION`.
+
+Try again on November 9. The response supplied no reset time, timezone, quota
+size, or rolling-window rule. If the quota remains exhausted, wait longer or ask
+the mail administrator for the actual limit. Signing in again restores a session;
+it is not known to reset the daily quota. A daily local job is installed for 14:00 Mac time, with downloads first eligible on November 9. It still requires a valid browser session.
+
+The downloader rejects HTML error pages instead of saving them as email files.
+It stops on a recognized daily-quota response and preserves completed downloads.
+Leave Brave open and signed in for the daily job. Close it when archival is complete to close its debugging port.
+
+## Checks
+
 ```bash
-python3 test_rediff_backup.py -v
+python3 -m unittest -q test_scheduled_backup.py test_webmail_archive.py test_rediff_backup.py
+node --check browser_cdp.mjs
+node --check webmail_archive.mjs
 ```
-*(You should see `Ran 5 tests ... OK`)*
 
----
+Ten Python tests passed on November 8. These cover the existing archive helpers
+and attachment extraction, including binary data, duplicate filenames, safe paths,
+repeat runs, corrupt originals, same-day retry suppression, and notification when the browser is unavailable. They do not prove that the server will serve
+all remaining messages after its quota resets.
 
-## 🚀 Step 2: Run the Terminal Archiver (Recommended)
+## Other methods
 
-Run the script with your company Rediffmail Pro email address:
+### GitHub and mobile access
+
+Push code, tests, and these Markdown guides to GitHub. Keep mailbox originals,
+attachments, credentials, session tokens, and private logs local and Git-ignored.
+You can read the repository and handoff note on a phone, but this pipeline runs
+on the Mac: it depends on desktop Brave's localhost debugging port and macOS
+LaunchAgents. GitHub Actions cannot access that local browser session. A phone
+does not replace the Mac for this implementation.
+
+The original IMAP script remains available for recent mail:
 
 ```bash
 python3 rediff_backup.py --user your_email@domain.com
 ```
 
-- You will be prompted to enter your password securely (keystrokes will be hidden).
-- The script connects over SSL (Port 993) to Rediffmail.
-- It will automatically scan all mail folders (INBOX, Sent, etc.).
-- It downloads the full `.eml` email and extracts every single attachment.
+Google Drive is optional and was not used for this run. It requires separately
+configured credentials before `gdrive_sync.py` can upload anything. The extension
+and console crawler are older alternatives; their download counters do not verify
+a complete historical archive. Use the Brave pipeline and verification report.
 
-### Where Do The Files Go?
-All files are saved inside `./backup_vault/` organized neatly by **Year $\rightarrow$ Month $\rightarrow$ Exact Date & Time Capsule**:
+## Daily schedule
 
-```text
-backup_vault/
-└── INBOX/
-    └── 2026/
-        └── 11-Nov/
-            └── 2026-11-07_07-52-AM_Rajesh_K2_TA_of_October_month/
-                ├── message_104.eml        <-- Full raw email
-                └── attachments/           <-- Extracted attachments
-                    ├── TA_October.xlsx
-                    └── receipt.pdf
-```
+The installed LaunchAgent is `com.reddifbackup.daily`, scheduled for 14:00 local
+Mac time. Today’s known exhausted quota is skipped; the first eligible download
+run is November 9. No chat session or coding assistant needs to stay open.
 
-> **Pro Tip:** The script automatically synchronizes the filesystem's `Date Modified` timestamp. When you open Finder or File Explorer and sort by **Date Modified**, all emails and attachments will be ordered in true chronological order.
+Keep the Mac powered on, your macOS user logged in, and Brave running with the
+local debugging port and an authenticated Rediffmail tab. A sleeping or powered-off
+Mac may delay or miss the intended time. The job does not wake or power on the Mac.
+Expired sessions need a manual sign-in; the runner requests one through a macOS
+notification. Notification delivery depends on your macOS notification settings.
 
----
+If about 46 additional originals can be saved per day, 221 remaining originals
+would need about five more successful daily runs. This is an estimate, not a
+verified quota. Further expiry, quota changes, or new messages can extend it.
 
-## 🛠️ Step 3: Useful Options & Flags
+Private run logs are saved in `logs/archive-*.log`. Scheduler output is in
+`logs/scheduler.log` and `logs/scheduler-error.log`. Inspect the job with:
 
-| Flag | What it does | Example |
-| :--- | :--- | :--- |
-| `--folder` | Sync only a specific folder | `python3 rediff_backup.py --user your@domain.com --folder INBOX` |
-| `--no-eml` | Download **only** attachments (skips `.eml` mail files) | `python3 rediff_backup.py --user your@domain.com --no-eml` |
-| `--organize-by date-split` | Put all EMLs in `eml/` and attachments in `attachments/` by month | `python3 rediff_backup.py --user your@domain.com --organize-by date-split` |
-| `--output <dir>` | Change destination folder | `python3 rediff_backup.py --user your@domain.com --output ~/Desktop/MyRediffBackup` |
-| `--upload-gdrive` | Automatically upload & sync all emails to Google Drive | `python3 rediff_backup.py --user your@domain.com --upload-gdrive` |
-| `--gdrive-zip` | Upload as a consolidated `.zip` archive to Google Drive | `python3 rediff_backup.py --user your@domain.com --upload-gdrive --gdrive-zip` |
-
-> **Safe to Interrupt & Resume:** If you stop the script (`Ctrl+C`), you can safely re-run it anytime. It automatically checks which emails have already been archived and skips them without re-downloading.
-
----
-
-## ☁️ Step 4: Google Drive Automation (`phsnoida@gmail.com`)
-
-You can sync your entire backup vault to Google Drive automatically:
-
-### 1-Click Backup & Cloud Sync:
 ```bash
-python3 rediff_backup.py --user your_email@domain.com --upload-gdrive
+launchctl print gui/$(id -u)/com.reddifbackup.daily
 ```
 
-### Standalone Sync / Resync:
+To disable the daily job:
+
 ```bash
-python3 gdrive_sync.py --share phsnoida@gmail.com
+launchctl bootout gui/$(id -u)/com.reddifbackup.daily
 ```
 
-### Continuous Background Daemon (Auto-syncs hourly):
+To install it again, run `python3 install_schedule.py --install`. Once the
+historical archive is verified complete, future scheduled invocations do no more
+downloading. This is a finite historical archive job, not ongoing new-mail sync.
+
+## macOS permission required before automation works
+
+The LaunchAgent is installed, but its smoke test failed with `Operation not
+permitted` when Python tried to read `scheduled_backup.py` inside Downloads.
+**Unattended execution is blocked until macOS grants the scheduled interpreter
+access.** The intended schedule is 14:00 local time; November 9 is the first
+eligible download date, provided this permission is resolved.
+
+In System Settings → Privacy & Security, grant Python Downloads access under
+Files and Folders if available. Otherwise add the scheduled interpreter,
+`/Library/Developer/CommandLineTools/usr/bin/python3`, under Full Disk Access.
+That broader permission applies to this interpreter, not just the backup script.
+After enabling access, smoke-test the job and inspect its logs:
+
 ```bash
-python3 gdrive_sync.py --daemon --interval 3600
+launchctl kickstart gui/$(id -u)/com.reddifbackup.daily
+cat logs/scheduler.log
+cat logs/scheduler-error.log
 ```
 
-### How It Works:
-1. It automatically creates a `ReddiffBackup_Vault` folder on Google Drive.
-2. If run from Shikhar's machine, it automatically grants full `writer` permissions to **`phsnoida@gmail.com`**, so you will see the folder appear in your Google Drive under **"Shared with me"** (or add a shortcut to **"My Drive"**).
-3. If you run it on your own machine signed in with `phsnoida@gmail.com`, it will sync directly into your own Google Drive root.
-4. **Idempotent delta sync**: It checks file sizes and skips any email or attachment that has already been uploaded, saving bandwidth and time.
-
----
-
-## 🌐 Fallback Option: Browser Extension HUD
-
-If your company domain administrator has blocked external IMAP access (port 993):
-
-1. Open **Microsoft Edge** or **Google Chrome** where your Rediffmail Pro webmail is currently logged in.
-2. Open a new tab and go to `edge://extensions` (or `chrome://extensions`).
-3. Turn on the **Developer mode** toggle (top right / left).
-4. Click **Load unpacked** and select the `extension/` folder inside this repository:
-   ```text
-   ReddifBackup/extension
-   ```
-5. Switch back to your open Rediffmail Pro tab and hit **Refresh**.
-6. You will see a dark **`⚡ REDIFF ARCHIVER HUD`** panel docked at the bottom right.
-7. Click **Scan Mail List** $\rightarrow$ **Download Attachments in View**. All attachments will download directly to your browser's `Downloads/ReddiffBackup/` folder.
-
----
-
-## ❓ Need Help / Troubleshooting
-
-- **"Authentication Failed"**: Verify your password. If your domain uses a custom mail shard instead of `imap.rediffmailpro.com`, add `--server mail.yourdomain.com`.
-- **"Connection Timeout"**: Make sure you are not on a restricted VPN or firewall that blocks port 993, or use the Browser Extension HUD.
+On November 8 the expected successful smoke-test output is “Already attempted
+today; waiting for the next daily run.” Existing error log lines may remain from
+the earlier failed attempt; inspect the newest output. If macOS still blocks it,
+the schedule cannot perform a backup until that access issue is resolved.
