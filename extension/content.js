@@ -13,12 +13,15 @@
     </div>
     <div id="rediff-archiver-body">
       <div id="rediff-archiver-stats">
-        <span id="rediff-stat-items">Mails with Attachments: 0</span>
+        <span id="rediff-stat-items">Page: 1 | Mails: 0</span>
         <span id="rediff-stat-status">Status: Idle</span>
       </div>
-      <button id="btn-scan" class="hud-btn secondary">🔍 Scan Mail List</button>
-      <button id="btn-download" class="hud-btn">⬇ Download Attachments in View</button>
-      <div id="rediff-archiver-logs">Ready. Click 'Scan Mail List' to inspect current view.</div>
+      <div style="display:flex; gap:6px;">
+        <button id="btn-scan" class="hud-btn secondary" style="flex:1;">🔍 Scan View</button>
+        <button id="btn-download-page" class="hud-btn" style="flex:1;">⬇ Current Page</button>
+      </div>
+      <button id="btn-download-all-pages" class="hud-btn" style="background:#1f6feb;">⚡ Auto-Download ALL Pages</button>
+      <div id="rediff-archiver-logs">Ready. Click 'Auto-Download ALL Pages' to crawl every page.</div>
     </div>
   `;
   document.body.appendChild(hud);
@@ -27,11 +30,13 @@
   const statsEl = document.getElementById("rediff-stat-items");
   const statusEl = document.getElementById("rediff-stat-status");
   const btnScan = document.getElementById("btn-scan");
-  const btnDownload = document.getElementById("btn-download");
+  const btnDownloadPage = document.getElementById("btn-download-page");
+  const btnDownloadAll = document.getElementById("btn-download-all-pages");
   const btnToggle = document.getElementById("rediff-archiver-toggle");
   const bodyEl = document.getElementById("rediff-archiver-body");
 
   let isRunning = false;
+  let shouldStop = false;
 
   function log(msg) {
     const time = new Date().toTimeString().split(" ")[0];
@@ -52,10 +57,8 @@
   });
 
   function getMailRows() {
-    // Rediffmail Pro vayu uses list rows with checkboxes and subject/sender
     const rows = Array.from(document.querySelectorAll("div[class*='mail_list'], div[class*='row'], tr, div.mail-item, [role='row']"));
     const validRows = rows.filter(r => {
-      // Must contain a checkbox or subject/sender text
       const hasCheckbox = r.querySelector("input[type='checkbox']") || r.querySelector("[class*='chk']");
       const hasSubject = r.innerText && r.innerText.includes("\n");
       return hasCheckbox && hasSubject;
@@ -63,7 +66,6 @@
 
     if (validRows.length > 0) return validRows;
 
-    // Fallback: search for paperclip or subject containers
     const rowsByCheckbox = Array.from(document.querySelectorAll("input[type='checkbox']"))
       .map(cb => cb.closest("div[class*='row'], tr, div[class*='item'], div[style*='display']"))
       .filter(Boolean);
@@ -71,93 +73,164 @@
     return [...new Set(rowsByCheckbox)];
   }
 
-  function hasAttachment(row) {
-    // Check for paperclip icon or SVG or text
-    const text = row.innerHTML.toLowerCase();
-    return text.includes("attachment") || text.includes("paperclip") || text.includes("clip") || text.includes("fa-paperclip");
+  function findNextPageButton() {
+    // 1. Check title/aria attributes
+    const byAttr = document.querySelector("[title*='Next' i], [aria-label*='Next' i], [title*='next page' i]");
+    if (byAttr && !isElementDisabled(byAttr)) return byAttr;
+
+    // 2. Check pagination container buttons/links
+    const candidates = Array.from(document.querySelectorAll(".pagination a, .paginate a, [class*='page'] a, [class*='page'] button, .next, .pg-next"));
+    for (const el of candidates) {
+      const txt = (el.innerText || "").trim();
+      if ((txt === ">" || txt === "»" || txt.toLowerCase() === "next") && !isElementDisabled(el)) {
+        return el;
+      }
+    }
+
+    // 3. Fallback: Search all clickable elements with arrow symbols
+    const allClickable = Array.from(document.querySelectorAll("a, button, span[onclick]"));
+    for (const el of allClickable) {
+      const txt = (el.innerText || "").trim();
+      const title = (el.getAttribute("title") || "").toLowerCase();
+      if ((txt === ">" || txt === "»" || title.includes("next")) && !isElementDisabled(el)) {
+        return el;
+      }
+    }
+
+    return null;
+  }
+
+  function isElementDisabled(el) {
+    if (!el) return true;
+    if (el.disabled || el.getAttribute("disabled") !== null) return true;
+    const cls = el.className || "";
+    if (typeof cls === "string" && (cls.includes("disabled") || cls.includes("inactive"))) return true;
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return true;
+    return false;
+  }
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+  async function processCurrentPage(pageNumber = 1) {
+    const rows = getMailRows();
+    log(`[Page ${pageNumber}] Processing ${rows.length} email entries...`);
+    statsEl.innerText = `Page: ${pageNumber} | Mails: ${rows.length}`;
+
+    for (let i = 0; i < rows.length; i++) {
+      if (shouldStop) break;
+      const row = rows[i];
+
+      const originalBg = row.style.backgroundColor;
+      row.style.backgroundColor = "rgba(56, 139, 253, 0.25)";
+
+      const snippet = (row.innerText || "").split("\n").filter(Boolean).slice(0, 2).join(" - ").trim();
+      log(`  [${i + 1}/${rows.length}] Opening: ${snippet.substring(0, 35)}...`);
+
+      const clickTarget = row.querySelector("a, span, [class*='subject']") || row;
+      clickTarget.click();
+      await sleep(1800);
+
+      const attLinks = Array.from(document.querySelectorAll("a[href*='download'], a[href*='attachment'], a[download], [title*='Download']"));
+      const validLinks = attLinks.filter(a => {
+        const href = a.getAttribute("href") || "";
+        return href && !href.startsWith("#") && !href.startsWith("javascript:void");
+      });
+
+      if (validLinks.length > 0) {
+        log(`    -> Found ${validLinks.length} attachment(s). Downloading...`);
+        for (const link of validLinks) {
+          const url = link.href;
+          const filename = (link.innerText || link.getAttribute("download") || "attachment").trim();
+          chrome.runtime.sendMessage({
+            action: "download_file",
+            url: url,
+            filename: `P${pageNumber}_${i + 1}_${filename}`
+          });
+          await sleep(500);
+        }
+      } else {
+        const downloadAllBtn = Array.from(document.querySelectorAll("button, a, span")).find(el => 
+          (el.innerText || "").toLowerCase().includes("download all")
+        );
+        if (downloadAllBtn) {
+          log(`    -> Clicking 'Download all attachments'...`);
+          downloadAllBtn.click();
+          await sleep(1000);
+        }
+      }
+
+      row.style.backgroundColor = originalBg;
+      await sleep(800);
+    }
   }
 
   btnScan.addEventListener("click", () => {
     const rows = getMailRows();
-    const withAtt = rows.filter(hasAttachment);
-    statsEl.innerText = `Mails: ${rows.length} | With Attachments: ${withAtt.length || 'Detected'}`;
-    log(`Scanned view: Found ${rows.length} email entries.`);
+    const nextBtn = findNextPageButton();
+    statsEl.innerText = `Mails: ${rows.length} | Next Page: ${nextBtn ? 'Found' : 'End'}`;
+    log(`Scanned view: Found ${rows.length} emails. Next Page button: ${nextBtn ? 'Yes' : 'Not detected/Last page'}`);
   });
 
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-  btnDownload.addEventListener("click", async () => {
+  btnDownloadPage.addEventListener("click", async () => {
     if (isRunning) return;
     isRunning = true;
-    btnDownload.disabled = true;
+    shouldStop = false;
+    btnDownloadPage.disabled = true;
     statusEl.innerText = "Status: Running";
-
     try {
-      const rows = getMailRows();
-      log(`Starting sequential download for ${rows.length} emails...`);
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        
-        // Highlight current row
-        const originalBg = row.style.backgroundColor;
-        row.style.backgroundColor = "rgba(56, 139, 253, 0.2)";
-
-        // Get sender / subject snippet
-        const snippet = (row.innerText || "").split("\n").filter(Boolean).slice(0, 2).join(" - ").trim();
-        log(`[${i + 1}/${rows.length}] Opening: ${snippet.substring(0, 40)}...`);
-
-        // Click row to open preview
-        const clickTarget = row.querySelector("a, span, [class*='subject']") || row;
-        clickTarget.click();
-        await sleep(1800);
-
-        // Scan preview pane for attachment download links
-        const attLinks = Array.from(document.querySelectorAll("a[href*='download'], a[href*='attachment'], a[download], [title*='Download']"));
-        const validLinks = attLinks.filter(a => {
-          const href = a.getAttribute("href") || "";
-          return href && !href.startsWith("#") && !href.startsWith("javascript:void");
-        });
-
-        if (validLinks.length > 0) {
-          log(`  -> Found ${validLinks.length} attachment(s). Triggering download...`);
-          for (const link of validLinks) {
-            const url = link.href;
-            const filename = (link.innerText || link.getAttribute("download") || "attachment").trim();
-            chrome.runtime.sendMessage({
-              action: "download_file",
-              url: url,
-              filename: `${i + 1}_${filename}`
-            });
-            await sleep(500);
-          }
-        } else {
-          // Check for 'Download all' button
-          const downloadAllBtn = Array.from(document.querySelectorAll("button, a, span")).find(el => 
-            (el.innerText || "").toLowerCase().includes("download all")
-          );
-          if (downloadAllBtn) {
-            log(`  -> Clicking 'Download all attachments' button...`);
-            downloadAllBtn.click();
-            await sleep(1000);
-          } else {
-            log(`  -> No direct attachment links found in preview.`);
-          }
-        }
-
-        row.style.backgroundColor = originalBg;
-        await sleep(1000);
-      }
-
-      log(`[✓] Batch complete for current view!`);
+      await processCurrentPage(1);
+      log(`[✓] Current page download completed.`);
     } catch (err) {
       log(`[!] Error: ${err.message}`);
     } finally {
       isRunning = false;
-      btnDownload.disabled = false;
+      btnDownloadPage.disabled = false;
       statusEl.innerText = "Status: Idle";
     }
   });
 
-  log("Extension HUD initialized.");
+  btnDownloadAll.addEventListener("click", async () => {
+    if (isRunning) {
+      shouldStop = true;
+      log(`[*] Stopping auto-page crawl...`);
+      return;
+    }
+    isRunning = true;
+    shouldStop = false;
+    btnDownloadAll.innerText = "🛑 Stop Crawl";
+    btnDownloadAll.style.background = "#da3633";
+    statusEl.innerText = "Status: Crawling All Pages";
+
+    let currentPage = 1;
+
+    try {
+      while (!shouldStop) {
+        log(`\n=== STARTING PAGE ${currentPage} ===`);
+        await processCurrentPage(currentPage);
+
+        const nextBtn = findNextPageButton();
+        if (!nextBtn) {
+          log(`[✓] No further 'Next Page' button found. Reached the final page!`);
+          break;
+        }
+
+        log(`[*] Clicking 'Next Page' -> Moving to page ${currentPage + 1}...`);
+        nextBtn.click();
+        await sleep(3500); // Wait for AJAX page render
+
+        currentPage++;
+      }
+      log(`\n[✓] ALL PAGES CRAWLED! Total pages processed: ${currentPage}`);
+    } catch (err) {
+      log(`[!] Crawler encountered error: ${err.message}`);
+    } finally {
+      isRunning = false;
+      btnDownloadAll.innerText = "⚡ Auto-Download ALL Pages";
+      btnDownloadAll.style.background = "#1f6feb";
+      statusEl.innerText = "Status: Idle";
+    }
+  });
+
+  log("Extension HUD ready with Multi-Page Crawl engine.");
 })();
