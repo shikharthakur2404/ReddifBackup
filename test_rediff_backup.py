@@ -170,6 +170,17 @@ class TestRediffBackup(unittest.TestCase):
             # Ensure file is still intact
             self.assertTrue(att_file.exists())
 
+    def test_gdrive_zip_creation(self):
+        from gdrive_sync import create_backup_zip
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = Path(tmpdir) / "vault"
+            source.mkdir()
+            (source / "doc.txt").write_text("Hello Pushkar")
+            out_zip = Path(tmpdir) / "backup.zip"
+            created = create_backup_zip(source, out_zip)
+            self.assertTrue(created.exists())
+            self.assertTrue(created.stat().st_size > 0)
+
 
 if __name__ == "__main__":
     unittest.main()

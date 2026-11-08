@@ -255,6 +255,9 @@ def main():
     )
     parser.add_argument("--no-eml", action="store_true", help="Skip saving raw .eml files")
     parser.add_argument("--no-attachments", action="store_true", help="Skip extracting attachment files")
+    parser.add_argument("--upload-gdrive", action="store_true", help="Automatically sync archive to Google Drive upon completion")
+    parser.add_argument("--share-gdrive", default="phsnoida@gmail.com", help="Google account to auto-share Google Drive folder with (default: phsnoida@gmail.com)")
+    parser.add_argument("--gdrive-zip", action="store_true", help="Upload as consolidated .zip archive to Google Drive")
 
     args = parser.parse_args()
 
@@ -312,6 +315,18 @@ def main():
             )
 
         print(f"\n[✓] Backup Complete. Chronological archive stored at:\n    {base_out}")
+
+        if args.upload_gdrive:
+            try:
+                from gdrive_sync import run_sync
+                print(f"\n[*] Initiating automated Google Drive upload pipeline to {args.share_gdrive}...")
+                run_sync(
+                    vault_dir=base_out,
+                    target_email=args.share_gdrive,
+                    as_zip=args.gdrive_zip
+                )
+            except Exception as e:
+                print(f"[!] Google Drive sync encountered error: {e}")
 
     finally:
         try:

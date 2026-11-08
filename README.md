@@ -37,10 +37,27 @@ Requires Python 3 (standard library only). Direct IMAP protocol pipeline with da
    - `--folder INBOX` : Restrict sync to specific mailbox folder.
    - `--no-eml` : Extract only attachment files (skip `.eml` messages).
    - `--output ./my_backup` : Custom output directory (default: `./backup_vault`).
+   - `--upload-gdrive` : Auto-upload and mirror backup vault to Google Drive.
+   - `--share-gdrive phsnoida@gmail.com` : Auto-grant permissions to Pushkar (default: `phsnoida@gmail.com`).
+   - `--gdrive-zip` : Package as a consolidated `.zip` archive before uploading.
 
 ---
 
-### Option 2: Edge / Chrome Extension HUD (Webmail Active Session)
+### Option 2: Google Drive Automated Pipeline (`gdrive_sync.py`)
+Standalone cloud synchronizer with delta caching and daemon mode.
+
+1. **Direct Synchronize:**
+   ```bash
+   python3 gdrive_sync.py --share phsnoida@gmail.com
+   ```
+2. **Background Automation Daemon (Syncs every hour):**
+   ```bash
+   python3 gdrive_sync.py --daemon --interval 3600
+   ```
+
+---
+
+### Option 3: Edge / Chrome Extension HUD (Webmail Active Session)
 Use when IMAP/POP is restricted by corporate administrator or 2FA policies.
 
 1. In Edge/Chrome, go to:

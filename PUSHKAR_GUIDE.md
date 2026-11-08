@@ -64,8 +64,37 @@ backup_vault/
 | `--no-eml` | Download **only** attachments (skips `.eml` mail files) | `python3 rediff_backup.py --user your@domain.com --no-eml` |
 | `--organize-by date-split` | Put all EMLs in `eml/` and attachments in `attachments/` by month | `python3 rediff_backup.py --user your@domain.com --organize-by date-split` |
 | `--output <dir>` | Change destination folder | `python3 rediff_backup.py --user your@domain.com --output ~/Desktop/MyRediffBackup` |
+| `--upload-gdrive` | Automatically upload & sync all emails to Google Drive | `python3 rediff_backup.py --user your@domain.com --upload-gdrive` |
+| `--gdrive-zip` | Upload as a consolidated `.zip` archive to Google Drive | `python3 rediff_backup.py --user your@domain.com --upload-gdrive --gdrive-zip` |
 
 > **Safe to Interrupt & Resume:** If you stop the script (`Ctrl+C`), you can safely re-run it anytime. It automatically checks which emails have already been archived and skips them without re-downloading.
+
+---
+
+## ☁️ Step 4: Google Drive Automation (`phsnoida@gmail.com`)
+
+You can sync your entire backup vault to Google Drive automatically:
+
+### 1-Click Backup & Cloud Sync:
+```bash
+python3 rediff_backup.py --user your_email@domain.com --upload-gdrive
+```
+
+### Standalone Sync / Resync:
+```bash
+python3 gdrive_sync.py --share phsnoida@gmail.com
+```
+
+### Continuous Background Daemon (Auto-syncs hourly):
+```bash
+python3 gdrive_sync.py --daemon --interval 3600
+```
+
+### How It Works:
+1. It automatically creates a `ReddiffBackup_Vault` folder on Google Drive.
+2. If run from Shikhar's machine, it automatically grants full `writer` permissions to **`phsnoida@gmail.com`**, so you will see the folder appear in your Google Drive under **"Shared with me"** (or add a shortcut to **"My Drive"**).
+3. If you run it on your own machine signed in with `phsnoida@gmail.com`, it will sync directly into your own Google Drive root.
+4. **Idempotent delta sync**: It checks file sizes and skips any email or attachment that has already been uploaded, saving bandwidth and time.
 
 ---
 
